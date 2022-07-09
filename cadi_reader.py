@@ -277,8 +277,12 @@ def unix2datestr(x):
 
 
 def plot_ionograms(ig):
+    #
+    # TODO: read dates and times of ionograms and write these to files
+    # add ionogram scaling here.
+    #
     for i in ig["ionograms"]:
-        plt.pcolormesh(ig["freqs"]/1e6,ig["virtual_heights"],i["ionogram_image"].T,cmap="gray")
+        plt.pcolormesh(ig["freqs"]/1e6,ig["virtual_heights"],i["ionogram_image"].T,cmap="gray",vmin=0,vmax=1.0)
         
         plt.title("%d %s %s"%(i["ionogram_idx"],unix2datestr(i["unix_time"]),ig["ascii_datetime"]))
         fname="ionogram_%d.h5"%(i["ionogram_idx"])
