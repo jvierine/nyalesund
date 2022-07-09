@@ -49,7 +49,7 @@ number_of_ionograms_to_plot = 60   # max number 60, one per minute. Each data fi
 
 
 def read_ionograms(filename,
-                   zenith_angle_limit=25.0, # don't include zenith angles larger than this
+                   zenith_angle_limit=20.0, # don't include zenith angles larger than this
                    antenna_separation=35.36):
 
     f = open(filename, "rb")    
@@ -97,8 +97,10 @@ def read_ionograms(filename,
         
         time_header = (jd - jd0) * 86400 + hour * 3600 + minute * 60 + sec
         time_hour = 3600 * (time_header / 3600)
-        
-        
+
+        # unix seconds at the beginning of the file
+        dt0=datetime.date(year, month_number, day)
+        unix_timestamp = (dt0 - datetime.date(1970, 1, 1)).total_seconds() + hour*3600 
 
         #############################################################################
         ### 2) Read all frequencies used
@@ -149,12 +151,20 @@ def read_ionograms(filename,
         hflag = 0
         
         time_min = struct.unpack("<B", f.read(1))[0]
+
+        unix_times=[]
+        
+        # as far as I can tell, this is hard coded so that there
+        # is one ionogram every minute!?!
         while time_min != 255:
+            print("time_min %d"%(time_min))
             time_sec = struct.unpack("<B", f.read(1))[0]
             flag = struct.unpack("<B", f.read(1))[0]  # gainflag
             # count the number of ionograms encountered in file
             timex += 1
             times.append(time_hour + 60 * time_min + time_sec)
+            
+            unix_times.append(unix_timestamp + 60 * time_min + time_sec)
             for freqx in range(nfreqs):
                 print(freqx)
                 noise_flag = struct.unpack("<B", f.read(1))[0]  # noiseflag
@@ -197,7 +207,7 @@ def read_ionograms(filename,
                         dopbin_x_dop_flag.append(dop_flag)
 
                     flag = struct.unpack("<B", f.read(1))[0]  # next hflag/gainflag/FF
-
+            
             time_min = flag
             if ((f.tell() - 1) != eof):
                 time_min = struct.unpack("<B", f.read(1))[0]  # next record
@@ -206,15 +216,19 @@ def read_ionograms(filename,
 
     f.close()
 
-    ionogram_time = np.array(dopbin_x_timex)
+    # these ionogram indices of all the echoes in the file
+    ionogram_indices = np.array(dopbin_x_timex)
+
+    # unix timestamps of the ionograms in the file
+    unix_times=np.array(unix_times)
 
     # convert to array of complex baseband signals
     dopbin_iq=np.vstack(dopbin_iq)
 
-
+    # these are all the unique ionogram indices in file (should be 0..59)
+    unique_ionogram_indices = np.unique(ionogram_indices)
+    n_ionograms=len(ionogram_indices)
     
-    ionogram_times = np.unique(ionogram_time)
-    n_ionograms=len(ionogram_times)
     print("found %d ionograms"%(n_ionograms))
 
     freq_idx=np.array(dopbin_x_freqx,dtype=np.uint64)
@@ -223,51 +237,49 @@ def read_ionograms(filename,
     # lambda is wavelength. note that this varies with frequency bin
     lamda = sc.c/freqs[freq_idx]
 
-    # two different ways to calculate zenith angle 
+    # two different ways to calculate zenith angle
+    # I think two of the antennas are rotated 180 degrees, giving a phase shift of 180 deg in phase, hence multiplication by -1
     zenith_angle02 = 180.0*np.arcsin(lamda*np.angle(-1*dopbin_iq[:,0]*np.conj(dopbin_iq[:,2]))/(2.0*np.pi*antenna_separation))/np.pi
     zenith_angle13 = 180.0*np.arcsin(lamda*np.angle(-1*dopbin_iq[:,1]*np.conj(dopbin_iq[:,3]))/(2.0*np.pi*antenna_separation))/np.pi
     
-#    plt.hist(zenith_angle02,bins=100)
- #   plt.xlabel("Zenith angle (deg)")
-  #  plt.show()
-
-   # plt.scatter(freq_idx,height_idx,c=np.angle(dopbin_iq[:,1]*np.conj(dopbin_iq[:,3])))
-   # plt.colorbar()
-   # plt.show()
-    
-
     ionograms = []
     
-    for i,this_ionogram_time in enumerate(ionogram_times):
-        ionogram_array = np.zeros([nfreqs,nheights],dtype=np.float32)
+    for i,this_ionogram_idx in enumerate(unique_ionogram_indices):
 
-        this_idx = np.where( (ionogram_time == this_ionogram_time) & (zenith_angle02 < zenith_angle_limit) & (zenith_angle02 < zenith_angle_limit) )[0]
-        
-        # custom metric convert O and X mode into a black and white image (0..1 scale)
+        # these ionogram echoes are at the same time
+        this_idx = np.where( (ionogram_indices == this_ionogram_idx) & (zenith_angle02 < zenith_angle_limit) & (zenith_angle13 < zenith_angle_limit) )[0]
 
-        phasor_diff=dopbin_iq[this_idx,0]*np.conj(dopbin_iq[this_idx,1])
+        complex_ionogram = np.zeros([nfreqs,nheights],dtype=np.complex64)
         
+        # average phasors
+        for tid in this_idx:
+            # use two different combinations of cross-polarized antennas to calculate the cross-polarization phase difference
+            # which provides us information about circular polarization (+/- pi/2 for left and right hand circular polarization)
+            # O-mode will correspond to phase difference -pi/2 and X-mode to pi/2
+            complex_ionogram[freq_idx[tid],height_idx[tid]]+= ( dopbin_iq[tid,0]*np.conj(dopbin_iq[tid,1]) + dopbin_iq[tid,0]*np.conj(dopbin_iq[tid,1]) )
+
+        complex_ionogram[np.abs(complex_ionogram)<1]=1.0
+
+       # custom metric convert O and X mode into a black and white image (0..1 scale)            
         omode_phasor=np.exp(-1j*np.pi/2.0)
-        xmode_phasor=np.exp(1j*np.pi/2.0)
 
-        # the angular distance to omode phase difference
-        # The X and Y polarization phase difference should be pi/2 for O/mode
-        omode_phdiff=np.abs(np.angle(phasor_diff*np.conj(omode_phasor)))
+        # The distance of the cross polarization phase difference from the O-mode expected phase difference, normalized to 0..1
+        omode_phdiff=np.abs(np.angle(complex_ionogram*np.conj(omode_phasor)))/np.pi
 
-        omode_phdiff[omode_phdiff>np.pi/2.0]=np.pi/2.0
-        omode_phdiff=2.0*omode_phdiff/np.pi
-
-        # when no echoes
-        ionogram_array[:,:]=0.5
-        ionogram_array[freq_idx[this_idx],height_idx[this_idx]]=omode_phdiff
-
-        ionograms.append({"ionogram_image":ionogram_array,
-                          "time":this_ionogram_time}
+        # use 16-bit float to save disk space
+        ionogram_img = np.array(omode_phdiff,dtype=np.float16)
+        
+        ionograms.append({"ionogram_image":ionogram_img,
+                          "ionogram_idx":this_ionogram_idx,
+                          "unix_time":unix_times[i]}
                          )
 
     return({"freqs":freqs,
+            "site":site,
             "virtual_heights":vheights,
             "ionograms":ionograms,
+            "ascii_datetime":ascii_datetime,
+            "unix_times":unix_times
             })
 
 
@@ -275,13 +287,15 @@ def read_ionograms(filename,
 
 res=read_ionograms(sys.argv[1])
 
+import stuffr
 
 
 def plot_ionograms(ig):
     for i in ig["ionograms"]:
         plt.pcolormesh(ig["freqs"]/1e6,ig["virtual_heights"],i["ionogram_image"].T,cmap="gray")
-
-        fname="ionogram_%d.h5"%(i["time"])
+        
+        plt.title("%d %s %s"%(i["ionogram_idx"],stuffr.unix2datestr(i["time_unix"]),ig["ascii_datetime"]))
+        fname="ionogram_%d.h5"%(i["ionogram_idx"])
         if os.path.exists(fname):
             ho=h5py.File(fname,"r+")
         else:
@@ -291,7 +305,7 @@ def plot_ionograms(ig):
             print("deleting")
             del ho["ionogram_image"]
         print(ho.keys())
-        ho["ionogram_image"]=i["ionogram_image"]
+        ho["ionogram_image"]=np.array(i["ionogram_image"],dtype=np.float16)
 
         if "freqs" in ho.keys():
             del ho["freqs"]
@@ -311,6 +325,7 @@ def plot_ionograms(ig):
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Height (km)")        
         plt.colorbar()
+        plt.show()
         plt.savefig("%s.png"%(fname))
         plt.close()
         plt.clf()
