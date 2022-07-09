@@ -5,53 +5,33 @@ Created on Wed Aug 11 09:36:04 2021
 
 @author: ase049
 """
-
-#############################################################################
 ###
-### Make ionogram color-coded by direction of backscatter.
-### Vertical incidence calculated from zenith angles 0 - 30 degrees
-### 6 directions (subject to adjustment) each 30-degree segments.
+### Make a cadi ionogram with only near zenith angles used. Use a 0..1 colorscale to
+### visualize polarization. 0 corresponds to pure O-mode and 1 corresponds to pure X-mode. 
 ###
-#############################################################################
 
 ### Introductory imports and constants
 
-import math
-from statistics import median
 import sys
 import struct
 import datetime
 from time import strptime
 import numpy as np
-import matplotlib as mpl
-import copy
 import matplotlib.pyplot as plt
-# 
 import h5py
 import os
-
 import scipy.constants as sc
-
-plt.rcParams["figure.figsize"] = (12, 8)
-
-max_ntimes = 256
-max_ndopbins = 300000
-dheight = 3.0  # not defined in data file
-
-ccc = 2.998e8 # speed of light
-#d = 35.36 # radar field distance. I assume this is the distance between antennas in meters
-
-
-output_file_format = '.png'
-number_of_ionograms_to_plot = 60   # max number 60, one per minute. Each data file is 1 hour.
-
-
 
 
 def read_ionograms(filename,
                    zenith_angle_limit=20.0, # don't include zenith angles larger than this
+                   dheight = 3.0,  # not defined in data file
                    antenna_separation=35.36):
 
+
+    max_ntimes = 256
+    max_ndopbins = 300000
+    
     f = open(filename, "rb")    
 
     # do some mumbojumbo with eof file? 
@@ -282,19 +262,25 @@ def read_ionograms(filename,
             "unix_times":unix_times
             })
 
+def unix2date(x):
+    return datetime.datetime.utcfromtimestamp(x)
 
+def dirname2unix(dirn):
+    r = re.search("(....)-(..)-(..)T(..)-(..)-(..)",dirn)
+    return(date2unix(int(r.group(1)),int(r.group(2)),int(r.group(3)),int(r.group(4)),int(r.group(5)),int(r.group(6))))
 
-
-res=read_ionograms(sys.argv[1])
-
-import stuffr
+def unix2datestr(x):
+    d0=np.floor(x/60.0)
+    frac=x-d0*60.0
+    stri=unix2date(x).strftime('%Y-%m-%d %H:%M:')
+    return("%s%02.2f"%(stri,frac))
 
 
 def plot_ionograms(ig):
     for i in ig["ionograms"]:
         plt.pcolormesh(ig["freqs"]/1e6,ig["virtual_heights"],i["ionogram_image"].T,cmap="gray")
         
-        plt.title("%d %s %s"%(i["ionogram_idx"],stuffr.unix2datestr(i["time_unix"]),ig["ascii_datetime"]))
+        plt.title("%d %s %s"%(i["ionogram_idx"],unix2datestr(i["unix_time"]),ig["ascii_datetime"]))
         fname="ionogram_%d.h5"%(i["ionogram_idx"])
         if os.path.exists(fname):
             ho=h5py.File(fname,"r+")
@@ -325,13 +311,16 @@ def plot_ionograms(ig):
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Height (km)")        
         plt.colorbar()
-        plt.show()
         plt.savefig("%s.png"%(fname))
         plt.close()
         plt.clf()
 
+
         
-plot_ionograms(res)
+if __name__ == "__main__":
+    # test case
+    res=read_ionograms(sys.argv[1])
+    plot_ionograms(res)
 
 
 
