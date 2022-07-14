@@ -274,7 +274,12 @@ def unix2datestr(x):
     frac=x-d0*60.0
     stri=unix2date(x).strftime('%Y-%m-%d %H:%M:')
     return("%s%02.2f"%(stri,frac))
-
+  
+def unix2cadi(x):
+    date = re.split('\s|:|-', unix2datestr(x))
+    m2c = chr(64 + int(date[1]))
+    cadi = date[0][3] + m2c + date[2] + date[3] + date[4]
+    return(cadi)
 
 def plot_ionograms(ig):
     #
