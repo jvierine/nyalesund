@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import h5py
 import os
 import scipy.constants as sc
+import re
 
 
 def read_ionograms(filename,
