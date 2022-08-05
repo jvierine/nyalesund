@@ -17,13 +17,20 @@ def on_press(event, fig, ax, is_line, i_line, scale_vals, ghost):
         if not is_line[0]:
             plt.legend()
         else:
+            #remove old line if updating
             ax.lines[i_line[0] + ghost].remove()
         
+        #update order of drawn lines
         for j in range(len(i_line)):
             if i_line[j] > i_line[0] and is_line[0]:
                 i_line[j] -= 1
+                
+        #line is drawn
         is_line[0] = 1
+        #place in order of drawn lines
         i_line[0] = sum(is_line) - 1
+        
+        #save scaled value
         foF2 = '%.3f' %mx
         scale_vals['foF2'] = float(foF2)
         fig.canvas.draw()
@@ -118,7 +125,7 @@ def plot_ionograms(ig):
                     ghostlines += 1
                     fig.canvas.draw()
                     
-        
+        #draw plot
         cm = ax.pcolormesh(ig['freqs']/1e6,ig['virtual_heights'],i['ionogram_image'].T,cmap='gray',vmin=0,vmax=1.0)
         ax.set_title('%d %s %s'%(i['ionogram_idx'],cr.unix2datestr(i['unix_time']),ig['ascii_datetime']))
         fname= cr.unix2cadi(i['unix_time'])
@@ -126,6 +133,7 @@ def plot_ionograms(ig):
         ax.set_ylabel('Height (km)')        
         cb = plt.colorbar(cm)
         
+        #These lists are used to keep track of what faded lines are drawn and which order they were drawn in
         is_line = [0, 0, 0, 0]
         i_line = [0, 0, 0, 0]
         scale_vals = {'foF2': 999.999,
@@ -134,6 +142,7 @@ def plot_ionograms(ig):
                       'hE':  9999.9
                       }
         
+        #connect on_press functionality to plot
         fig.canvas.mpl_connect('key_press_event', lambda event: on_press(event, fig, ax, is_line, i_line, scale_vals, ghostlines))
         plt.show()
         
@@ -143,8 +152,8 @@ def plot_ionograms(ig):
     
         fig.savefig('%s.png'%(fname))
         plt.close()
-        #plt.clf()
         
+        #Create .h5 file
         h5name = '%s.h5'%(fname)
         if os.path.exists(h5name):
             ho=h5py.File(h5name,'r+')
